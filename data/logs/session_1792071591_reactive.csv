@@ -1,0 +1,2 @@
+session_id,episode,pipe_index,gap_size,gap_center,bird_y_at_pass,bird_vel_at_pass,time_since_last_pass,success,consecutive_successes_before,consecutive_failures_before,success_rate_last3,success_rate_last5,survival_time,total_pipes_passed,controller
+1792071591,0,0,165,,653.0,18.0,1792071591.748,0,0,0,0.0,0.0,1792071591.748,0,reactive

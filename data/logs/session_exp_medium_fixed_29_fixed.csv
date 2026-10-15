@@ -1,0 +1,4 @@
+session_id,episode,pipe_index,gap_size,gap_center,bird_y_at_pass,bird_vel_at_pass,time_since_last_pass,success,consecutive_successes_before,consecutive_failures_before,success_rate_last3,success_rate_last5,survival_time,total_pipes_passed,controller
+exp_medium_fixed_29,0,1,165,251.45028226504962,202.0,-2.0,0.001,1,0,0,0.0,0.0,0.001,1,fixed
+exp_medium_fixed_29,0,2,165,392.8625362425142,345.0,2.0,0.001,1,1,0,1.0,1.0,0.003,2,fixed
+exp_medium_fixed_29,0,2,165,392.8625362425142,321.0,-7.5,0.0,0,2,0,1.0,1.0,0.003,2,fixed

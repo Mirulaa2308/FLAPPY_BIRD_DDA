@@ -1,0 +1,12 @@
+session_id,episode,pipe_index,gap_size,gap_center,bird_y_at_pass,bird_vel_at_pass,time_since_last_pass,success,consecutive_successes_before,consecutive_failures_before,success_rate_last3,success_rate_last5,survival_time,total_pipes_passed,controller
+train_medium_240,0,1,240,265.16606702160686,217.0,-3.0,0.001,1,0,0,0.0,0.0,0.001,1,fixed
+train_medium_240,0,2,240,184.98170532041115,138.5,-2.5,0.001,1,1,0,1.0,1.0,0.003,2,fixed
+train_medium_240,0,3,240,360.4659251217268,305.5,0.5,0.001,1,2,0,1.0,1.0,0.004,3,fixed
+train_medium_240,0,4,240,354.3814505076287,350.5,-7.0,0.001,1,3,0,1.0,1.0,0.005,4,fixed
+train_medium_240,0,5,240,203.70747000509454,156.0,1.5,0.001,1,4,0,1.0,1.0,0.007,5,fixed
+train_medium_240,0,6,240,284.9930098485813,298.5,8.0,0.001,1,5,0,1.0,1.0,0.009,6,fixed
+train_medium_240,0,7,240,361.9456723586178,315.5,-3.0,0.001,1,6,0,1.0,1.0,0.01,7,fixed
+train_medium_240,0,8,240,289.682630295726,245.0,-3.5,0.001,1,7,0,1.0,1.0,0.012,8,fixed
+train_medium_240,0,9,240,374.5276466464239,328.0,2.5,0.001,1,8,0,1.0,1.0,0.014,9,fixed
+train_medium_240,0,10,240,305.7175091898972,253.0,1.0,0.001,1,9,0,1.0,1.0,0.015,10,fixed
+train_medium_240,0,11,240,225.0416540559878,178.0,1.0,0.001,1,10,0,1.0,1.0,0.016,11,fixed

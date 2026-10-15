@@ -1,0 +1,5 @@
+session_id,episode,pipe_index,gap_size,gap_center,bird_y_at_pass,bird_vel_at_pass,time_since_last_pass,success,consecutive_successes_before,consecutive_failures_before,success_rate_last3,success_rate_last5,survival_time,total_pipes_passed,controller
+d,0,0,165,,653.0,18.0,1792073557.631,0,0,0,0.0,0.0,1792073557.631,0,fixed
+d,0,0,200,,644.5,-8.5,1792073557.632,0,0,1,0.0,0.0,1792073557.633,0,fixed
+d,0,0,200,,644.5,8.0,1792073557.634,0,0,2,0.0,0.0,1792073557.634,0,fixed
+d,0,0,200,,644.5,8.5,1792073557.636,0,0,3,0.0,0.0,1792073557.636,0,fixed

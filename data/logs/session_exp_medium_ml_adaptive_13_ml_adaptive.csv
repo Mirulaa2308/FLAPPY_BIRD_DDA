@@ -1,0 +1,10 @@
+session_id,episode,pipe_index,gap_size,gap_center,bird_y_at_pass,bird_vel_at_pass,time_since_last_pass,success,consecutive_successes_before,consecutive_failures_before,success_rate_last3,success_rate_last5,survival_time,total_pipes_passed,controller
+exp_medium_ml_adaptive_13,0,1,165,176.74905859236998,162.0,6.0,0.001,1,0,0,0.0,0.0,0.001,1,ml_adaptive
+exp_medium_ml_adaptive_13,0,2,173,164.20111348005022,115.0,-1.0,0.001,1,1,0,1.0,1.0,0.006,2,ml_adaptive
+exp_medium_ml_adaptive_13,0,3,165,407.7349121426179,353.0,0.0,0.001,1,2,0,1.0,1.0,0.01,3,ml_adaptive
+exp_medium_ml_adaptive_13,0,4,157,244.87444048025333,260.5,-8.5,0.001,1,3,0,1.0,1.0,0.014,4,ml_adaptive
+exp_medium_ml_adaptive_13,0,5,149,359.6546490316272,315.5,-3.5,0.0,1,4,0,1.0,1.0,0.018,5,ml_adaptive
+exp_medium_ml_adaptive_13,0,6,141,284.59759446486487,236.5,-3.0,0.0,1,5,0,1.0,1.0,0.022,6,ml_adaptive
+exp_medium_ml_adaptive_13,0,7,133,148.75099692771775,99.5,2.0,0.001,1,6,0,1.0,1.0,0.026,7,ml_adaptive
+exp_medium_ml_adaptive_13,0,8,125,230.99222197614125,248.5,8.0,0.001,1,7,0,1.0,1.0,0.03,8,ml_adaptive
+exp_medium_ml_adaptive_13,0,8,117,141.70957055574505,90.5,-2.0,0.0,0,8,0,1.0,1.0,0.034,8,ml_adaptive

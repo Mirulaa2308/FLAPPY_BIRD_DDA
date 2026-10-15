@@ -1,0 +1,2 @@
+session_id,episode,pipe_index,gap_size,gap_center,bird_y_at_pass,bird_vel_at_pass,time_since_last_pass,success,consecutive_successes_before,consecutive_failures_before,success_rate_last3,success_rate_last5,survival_time,total_pipes_passed,controller
+exp_low_ml_adaptive_22,0,0,165,,-0.5,-8.0,0.0,0,0,0,0.0,0.0,0.0,0,ml_adaptive

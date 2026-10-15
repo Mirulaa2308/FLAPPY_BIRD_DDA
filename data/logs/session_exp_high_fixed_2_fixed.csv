@@ -1,0 +1,10 @@
+session_id,episode,pipe_index,gap_size,gap_center,bird_y_at_pass,bird_vel_at_pass,time_since_last_pass,success,consecutive_successes_before,consecutive_failures_before,success_rate_last3,success_rate_last5,survival_time,total_pipes_passed,controller
+exp_high_fixed_2,0,1,165,191.819299614459,158.0,5.0,0.002,1,0,0,0.0,0.0,0.002,1,fixed
+exp_high_fixed_2,0,2,165,212.60366897444035,173.0,-4.0,0.002,1,1,0,1.0,1.0,0.005,2,fixed
+exp_high_fixed_2,0,3,165,153.04171481778658,126.0,-6.0,0.002,1,2,0,1.0,1.0,0.009,3,fixed
+exp_high_fixed_2,0,4,165,146.0049386582908,111.0,4.0,0.001,1,3,0,1.0,1.0,0.012,4,fixed
+exp_high_fixed_2,0,5,165,313.4814724441185,316.0,7.5,0.001,1,4,0,1.0,1.0,0.017,5,fixed
+exp_high_fixed_2,0,6,165,354.94928448178763,298.0,-2.0,0.001,1,5,0,1.0,1.0,0.02,6,fixed
+exp_high_fixed_2,0,7,165,398.4872879144853,378.0,5.5,0.001,1,6,0,1.0,1.0,0.023,7,fixed
+exp_high_fixed_2,0,8,165,380.9097882148851,321.0,-0.5,0.001,1,7,0,1.0,1.0,0.026,8,fixed
+exp_high_fixed_2,0,8,165,380.9097882148851,304.5,-8.0,0.0,0,8,0,1.0,1.0,0.027,8,fixed

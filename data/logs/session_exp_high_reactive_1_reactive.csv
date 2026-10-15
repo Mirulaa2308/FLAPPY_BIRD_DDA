@@ -1,0 +1,8 @@
+session_id,episode,pipe_index,gap_size,gap_center,bird_y_at_pass,bird_vel_at_pass,time_since_last_pass,success,consecutive_successes_before,consecutive_failures_before,success_rate_last3,success_rate_last5,survival_time,total_pipes_passed,controller
+exp_high_reactive_1,0,1,165,201.7530559095042,162.0,4.0,0.001,1,0,0,0.0,0.0,0.001,1,reactive
+exp_high_reactive_1,0,2,165,273.7115537318508,263.0,-7.0,0.0,1,1,0,1.0,1.0,0.001,2,reactive
+exp_high_reactive_1,0,3,165,162.35573982962828,109.0,-2.5,0.0,1,2,0,1.0,1.0,0.002,3,reactive
+exp_high_reactive_1,0,4,165,247.57948811404233,204.0,3.5,0.0,1,3,0,1.0,1.0,0.002,4,reactive
+exp_high_reactive_1,0,5,153,377.49604040118686,384.5,8.0,0.0,1,4,0,1.0,1.0,0.005,5,reactive
+exp_high_reactive_1,0,6,141,452.8355437302574,401.5,-3.0,0.0,1,5,0,1.0,1.0,0.006,6,reactive
+exp_high_reactive_1,0,6,129,277.82149360039443,218.5,-1.0,0.0,0,6,0,1.0,1.0,0.006,6,reactive
