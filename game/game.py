@@ -34,6 +34,7 @@ class FlappyGame:
         self.pipe_index = 0
         self.frame_count = 0
         self.episode_start = 0
+        self.attempt_collisions = 0
         self.success_history = []
         self.last_pass_time = 0
         self.current_gap = GAP_DEFAULT
@@ -48,6 +49,25 @@ class FlappyGame:
         self.episode_start = time.time()
         self.last_pass_time = self.episode_start
         self.current_gap = self.controller.current_gap
+
+    def begin_attempt(self):
+        self.reset_episode()
+        self.success_history = []
+        self.attempt_collisions = 0
+        begin = getattr(self.controller, "begin_attempt", None)
+        if callable(begin):
+            self.current_gap = begin()
+
+    def end_attempt(self, outcome):
+        end = getattr(self.controller, "end_attempt", None)
+        if callable(end):
+            end({
+                "score": self.score,
+                "survival_time": max(0.0, time.time() - self.episode_start),
+                "obstacles_passed": self.score,
+                "collisions": self.attempt_collisions,
+                "outcome": outcome,
+            })
 
     def spawn_pipe(self):
         self.pipes.append(Pipe(SCREEN_WIDTH + 40, self.current_gap))
@@ -87,10 +107,12 @@ class FlappyGame:
         }
 
     def handle_collision(self, pipe=None):
+        self.attempt_collisions += 1
         outcome = self.build_outcome_record(success=False, pipe=pipe)
         self.success_history.append(0)
         self.logger.log(outcome)
-        self.current_gap = self.controller.on_pipe_outcome(outcome)
+        if not callable(getattr(self.controller, "begin_attempt", None)):
+            self.current_gap = self.controller.on_pipe_outcome(outcome)
         return True
 
     def check_pass(self):
@@ -102,7 +124,8 @@ class FlappyGame:
                 outcome = self.build_outcome_record(success=True, pipe=pipe)
                 self.success_history.append(1)
                 self.logger.log(outcome)
-                self.current_gap = self.controller.on_pipe_outcome(outcome)
+                if not callable(getattr(self.controller, "begin_attempt", None)):
+                    self.current_gap = self.controller.on_pipe_outcome(outcome)
                 self.last_pass_time = time.time()
 
     def update(self, jump=False):
@@ -149,15 +172,19 @@ class FlappyGame:
         pygame.display.flip()
 
     def run_episode(self, max_frames=10000, agent=None, fps=None):
-        self.reset_episode()
-        self.controller.reset()
-        self.success_history = []
-        self.current_gap = self.controller.current_gap
+        if callable(getattr(self.controller, "begin_attempt", None)):
+            self.begin_attempt()
+        else:
+            self.reset_episode()
+            self.controller.reset()
+            self.success_history = []
+            self.attempt_collisions = 0
 
         for _ in range(max_frames):
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     self.running = False
+                    self.end_attempt("exit")
                     return self.score
                 if event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
                     self.bird.jump()
@@ -170,7 +197,10 @@ class FlappyGame:
                 self.clock.tick(fps or FPS)
 
             if done:
+                self.end_attempt("collision")
                 break
+        else:
+            self.end_attempt("win")
 
         return self.score
 
@@ -181,15 +211,22 @@ class FlappyGame:
 def play_human(controller, session_id=None):
     game = FlappyGame(controller, session_id=session_id)
     print(f"Controller: {controller.name}. Press SPACE to jump. Q to quit.")
+
+    def begin_attempt():
+        game.begin_attempt()
+
+    begin_attempt()
     while game.running:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
+                game.end_attempt("exit")
                 game.quit()
                 return
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_SPACE:
                     game.bird.jump()
                 elif event.key == pygame.K_q:
+                    game.end_attempt("exit")
                     game.quit()
                     return
 
@@ -198,8 +235,7 @@ def play_human(controller, session_id=None):
         game.clock.tick(FPS)
 
         if done:
+            game.end_attempt("collision")
             game.episode += 1
             print(f"Episode {game.episode} ended. Score: {game.score}")
-            game.reset_episode()
-            game.success_history = []
-            game.current_gap = game.controller.current_gap
+            begin_attempt()

@@ -1,0 +1,23 @@
+"""Train the cycle-level skill model from data/attempt_history.json.
+Each sample = features of one N-attempt cycle; label = success rate of the NEXT
+cycle (a skill proxy that already accounts for the gap the player faced).
+Needs >= ~20 completed cycles; below that the controller uses the labelled fallback."""
+import json, pickle, sys
+from sklearn.ensemble import RandomForestRegressor
+sys.path.insert(0, ".")
+from controllers.multiattempt import AttemptRecord, aggregate_features, FEATURE_ORDER, AssessmentConfig
+
+N = AssessmentConfig().attempts_per_cycle
+hist = json.load(open("data/attempt_history.json"))["history"]
+recs = [AttemptRecord(**r) for r in hist]
+cycles = [recs[i:i+N] for i in range(0, len(recs) - N + 1, N)]
+X, y = [], []
+for a, b in zip(cycles, cycles[1:]):
+    f = aggregate_features(a)
+    X.append([f[k] for k in FEATURE_ORDER])
+    y.append(sum(r.success for r in b) / len(b))
+if len(X) < 20:
+    sys.exit(f"Only {len(X)} samples - play more or merge your old data/ logs first.")
+model = RandomForestRegressor(n_estimators=200, min_samples_leaf=2, random_state=0).fit(X, y)
+pickle.dump(model, open("data/skill_model.pkl", "wb"))
+print("saved data/skill_model.pkl from", len(X), "cycles")
