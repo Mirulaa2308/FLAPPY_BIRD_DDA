@@ -1,20 +1,23 @@
-"""Sky and background rendering with day → evening → night progression.
+"""Sky and background rendering with repeating Day → Evening → Night cycle.
 
-Phase is driven by pipes_passed (not elapsed time).
-  0-9   pipes → daytime   (blue sky, white clouds)
- 10-19  pipes → evening   (orange/pink/purple sunset)
- 20+    pipes → night     (dark blue, stars, moon)
+Phase is driven by pipes_passed using a repeating 40-pipe cycle:
+  cycle_pos = pipes_passed % SKY_CYCLE_PERIOD
+   0 – 9   → Day       (blue sky, white clouds, sun)
+  10 – 19  → Evening   (orange/pink/purple sunset)
+  20 – 39  → Night     (dark blue, stars, moon)
 
-Smooth cross-fades happen at the thresholds. Parallax cloud/star layers
-scroll at different speeds to add depth.
+The cycle repeats every 40 pipes (configurable via SKY_CYCLE_PERIOD).
+Smooth cross-fades happen across 5-pipe blend zones at each threshold.
+Parallax cloud/star layers scroll at different speeds to add depth.
 """
 import math
 import random
 import pygame
 from game.config import (
     SCREEN_WIDTH, SCREEN_HEIGHT,
-    SKY_EVENING_START, SKY_NIGHT_START
+    SKY_CYCLE_PERIOD, SKY_DAY_END, SKY_EVENING_END,
 )
+
 
 # ---------------------------------------------------------------------------
 # Sky colour key-frames  (top, bottom)
@@ -51,30 +54,53 @@ def _smooth(t):
     return t * t * (3 - 2 * t)
 
 
-def _sky_colors(pipes_passed):
-    """Return (top_color, bottom_color, ground_color) for the current score."""
-    blend_range = 5   # pipes over which cross-fade happens
+def _cycle_pos(pipes_passed):
+    """Return position within the current 40-pipe cycle [0, SKY_CYCLE_PERIOD)."""
+    return pipes_passed % SKY_CYCLE_PERIOD
 
-    if pipes_passed < SKY_EVENING_START:
-        t = 0.0
-        top    = _lerp_color(_DAY_TOP, _EVENING_TOP, t)
-        bottom = _lerp_color(_DAY_BOT, _EVENING_BOT, t)
+
+def _sky_colors(pipes_passed):
+    """Return (top_color, bottom_color, ground_color) for pipes_passed.
+
+    Uses a repeating SKY_CYCLE_PERIOD-pipe cycle:
+      0..SKY_DAY_END-1     → Day
+      SKY_DAY_END..SKY_EVENING_END-1 → Evening / Sunset
+      SKY_EVENING_END..end → Night
+    Cross-fades happen over BLEND_RANGE pipes at each boundary.
+    """
+    BLEND = 5   # cross-fade width in pipes
+    cp = _cycle_pos(pipes_passed)   # 0..39
+
+    if cp < SKY_DAY_END:
+        # Pure day (or blend back from night at cycle boundary handled below)
+        top    = _DAY_TOP
+        bottom = _DAY_BOT
+        ground = _GROUND_DAY
+        # Blend from night at the very start of a new cycle (cp 0..BLEND)
+        if cp < BLEND and pipes_passed >= SKY_CYCLE_PERIOD:
+            t = _smooth(1.0 - cp / BLEND)
+            top    = _lerp_color(_DAY_TOP,    _NIGHT_TOP,    t)
+            bottom = _lerp_color(_DAY_BOT,    _NIGHT_BOT,    t)
+            ground = _lerp_color(_GROUND_DAY, _GROUND_NIGHT, t)
+    elif cp < SKY_DAY_END + BLEND:
+        # Day → Evening blend
+        t = _smooth((cp - SKY_DAY_END) / BLEND)
+        top    = _lerp_color(_DAY_TOP,    _EVENING_TOP,    t)
+        bottom = _lerp_color(_DAY_BOT,    _EVENING_BOT,    t)
         ground = _lerp_color(_GROUND_DAY, _GROUND_EVENING, t)
-    elif pipes_passed < SKY_EVENING_START + blend_range:
-        t = _smooth((pipes_passed - SKY_EVENING_START) / blend_range)
-        top    = _lerp_color(_DAY_TOP, _EVENING_TOP, t)
-        bottom = _lerp_color(_DAY_BOT, _EVENING_BOT, t)
-        ground = _lerp_color(_GROUND_DAY, _GROUND_EVENING, t)
-    elif pipes_passed < SKY_NIGHT_START:
+    elif cp < SKY_EVENING_END:
+        # Pure evening
         top    = _EVENING_TOP
         bottom = _EVENING_BOT
         ground = _GROUND_EVENING
-    elif pipes_passed < SKY_NIGHT_START + blend_range:
-        t = _smooth((pipes_passed - SKY_NIGHT_START) / blend_range)
-        top    = _lerp_color(_EVENING_TOP, _NIGHT_TOP, t)
-        bottom = _lerp_color(_EVENING_BOT, _NIGHT_BOT, t)
+    elif cp < SKY_EVENING_END + BLEND:
+        # Evening → Night blend
+        t = _smooth((cp - SKY_EVENING_END) / BLEND)
+        top    = _lerp_color(_EVENING_TOP,    _NIGHT_TOP,    t)
+        bottom = _lerp_color(_EVENING_BOT,    _NIGHT_BOT,    t)
         ground = _lerp_color(_GROUND_EVENING, _GROUND_NIGHT, t)
     else:
+        # Pure night
         top    = _NIGHT_TOP
         bottom = _NIGHT_BOT
         ground = _GROUND_NIGHT
@@ -190,22 +216,22 @@ class BackgroundRenderer:
 
     # ------------------------------------------------------------------ #
     def _cloud_opacity(self):
-        """Clouds fade out as night approaches."""
-        p = self._pipes_passed
-        if p < SKY_EVENING_START:
+        """Clouds fade out as night approaches (cycle-aware)."""
+        cp = _cycle_pos(self._pipes_passed)
+        if cp < SKY_DAY_END:
             return 1.0
-        if p < SKY_NIGHT_START:
-            return 1.0 - _smooth((p - SKY_EVENING_START) / (SKY_NIGHT_START - SKY_EVENING_START)) * 0.7
+        if cp < SKY_EVENING_END:
+            return 1.0 - _smooth((cp - SKY_DAY_END) / (SKY_EVENING_END - SKY_DAY_END)) * 0.7
         return 0.3
 
     def _star_opacity(self):
-        """Stars fade in starting at evening."""
-        p = self._pipes_passed
-        if p < SKY_EVENING_START:
+        """Stars fade in starting at evening (cycle-aware)."""
+        cp = _cycle_pos(self._pipes_passed)
+        if cp < SKY_DAY_END:
             return 0.0
-        if p < SKY_NIGHT_START:
-            return _smooth((p - SKY_EVENING_START) / (SKY_NIGHT_START - SKY_EVENING_START)) * 0.5
-        return min(1.0, _smooth((p - SKY_NIGHT_START) / 5))
+        if cp < SKY_EVENING_END:
+            return _smooth((cp - SKY_DAY_END) / (SKY_EVENING_END - SKY_DAY_END)) * 0.5
+        return min(1.0, _smooth((cp - SKY_EVENING_END) / 5))
 
     # ------------------------------------------------------------------ #
     def draw(self, surface):
@@ -220,18 +246,20 @@ class BackgroundRenderer:
         for s in self.stars:
             s.draw(surface, star_op)
 
-        # Moon (appears at night)
-        if self._pipes_passed >= SKY_NIGHT_START - 2:
-            moon_op = min(1.0, _smooth((self._pipes_passed - (SKY_NIGHT_START - 2)) / 5))
+        # Moon (appears at night – cycle-aware)
+        cp = _cycle_pos(self._pipes_passed)
+        night_start = SKY_EVENING_END - 2
+        if cp >= night_start:
+            moon_op = min(1.0, _smooth((cp - night_start) / 5))
             self._draw_moon(surface, moon_op)
 
-        # Sun / evening glow
-        if self._pipes_passed < SKY_NIGHT_START:
-            if self._pipes_passed < SKY_EVENING_START:
+        # Sun / evening glow (cycle-aware)
+        if cp < SKY_EVENING_END:
+            if cp < SKY_DAY_END:
                 self._draw_sun(surface, 1.0)
             else:
-                sun_fade = 1.0 - _smooth((self._pipes_passed - SKY_EVENING_START) /
-                                         (SKY_NIGHT_START - SKY_EVENING_START))
+                sun_fade = 1.0 - _smooth((cp - SKY_DAY_END) /
+                                         (SKY_EVENING_END - SKY_DAY_END))
                 self._draw_sun(surface, sun_fade)
 
         # Clouds (far layer first, then near for depth)

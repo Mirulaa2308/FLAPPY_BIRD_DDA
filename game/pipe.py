@@ -10,7 +10,17 @@ PIPE_CAP_HEIGHT = 14   # little cap drawn on pipe ends
 
 
 class Pipe:
-    def __init__(self, x, gap_size, gap_center=None, speed=None):
+    def __init__(self, x, gap_size, gap_center=None, speed=None,
+                 prev_center=None, max_center_delta=None):
+        """
+        x               : spawn x position
+        gap_size        : vertical gap between top and bottom pipe
+        gap_center      : explicit centre y of the gap; randomised if None
+        speed           : pixels/frame; falls back to config PIPE_SPEED
+        prev_center     : centre y of the previous pipe (for delta clamping)
+        max_center_delta: max allowed |centre shift| from prev_center;
+                          prevents impossible consecutive arrangements
+        """
         self.x = float(x)
         self.gap_size = gap_size
         self.passed = False
@@ -18,8 +28,27 @@ class Pipe:
 
         min_center = PIPE_MIN_TOP + gap_size / 2
         max_center = SCREEN_HEIGHT - PIPE_MAX_TOP_MARGIN - gap_size / 2
+
+        # Guard against degenerate geometry (gap too large for the screen)
+        if min_center > max_center:
+            min_center = SCREEN_HEIGHT * 0.25
+            max_center = SCREEN_HEIGHT * 0.75
+
         if gap_center is None:
-            gap_center = random.uniform(min_center, max_center)
+            if prev_center is not None and max_center_delta is not None:
+                # Constrain new centre to be within delta of the previous one
+                lo = max(min_center, prev_center - max_center_delta)
+                hi = min(max_center, prev_center + max_center_delta)
+                # Safety fallback if constraints make range empty
+                if lo > hi:
+                    lo, hi = min_center, max_center
+                gap_center = random.uniform(lo, hi)
+            else:
+                gap_center = random.uniform(min_center, max_center)
+        else:
+            # Clamp explicit centre into the safe playable range
+            gap_center = max(min_center, min(max_center, gap_center))
+
         self.gap_center = gap_center
 
     def update(self):

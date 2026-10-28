@@ -37,7 +37,7 @@ MIN_SAMPLES_TO_TRAIN = 80      # rows with valid labels (not just successes)
 MIN_POSITIVE_RATE    = 0.05    # need at least 5 % success (else data is trivial)
 MAX_POSITIVE_RATE    = 0.95    # need at least 5 % failure
 RETRAIN_COOLDOWN_S   = 300     # seconds: don't retrain more than once per 5 min
-_LAST_RETRAIN_FILE   = "data/.last_human_retrain"
+_LAST_RETRAIN_FILE   = "data/last_human_retrain.txt"
 
 FEATURE_NAMES = [
     "gap_size",
@@ -57,40 +57,53 @@ FEATURE_NAMES = [
 # Data loading
 # ---------------------------------------------------------------------------
 
-def _load_human_rows(log_dir: str = LOG_DIR, controller_filter: str = "adaptive"):
-    """Read all session CSVs produced with the given controller name.
+def _load_human_rows(log_dir: str = LOG_DIR,
+                     controller_filter: str = None,
+                     controller_filters: tuple = None,
+                     verbose: bool = False):
+    """Read all session CSVs produced with the given controller name(s).
 
+    controller_filters takes priority over controller_filter.
+    Pass controller_filters=("adaptive", "maharoga") to include both.
     Returns a list of dicts (raw CSV rows) with consistent numeric fields.
-    Rows with obviously corrupt values (epoch-scale time, missing gap) are
-    skipped with a warning counter printed at the end.
+    Rows with obviously corrupt values are skipped.
     """
+    # Normalise into a tuple of accepted names
+    if controller_filters is not None:
+        accepted = tuple(controller_filters)
+    elif controller_filter is not None:
+        accepted = (controller_filter,)
+    else:
+        accepted = ("adaptive",)   # legacy default
+
     rows = []
     skipped = 0
     log_path = Path(log_dir)
     if not log_path.exists():
         return rows
 
-    for csv_file in sorted(log_path.glob(f"session_*_{controller_filter}.csv")):
-        try:
-            with open(csv_file, newline="") as fh:
-                reader = csv.DictReader(fh)
-                for row in reader:
-                    try:
-                        gap = float(row["gap_size"])
-                        if not (50 <= gap <= 300):          # sanity: reasonable gap
+    for suffix in accepted:
+        for csv_file in sorted(log_path.glob(f"session_*_{suffix}.csv")):
+            try:
+                with open(csv_file, newline="") as fh:
+                    reader = csv.DictReader(fh)
+                    for row in reader:
+                        try:
+                            gap = float(row["gap_size"])
+                            if not (50 <= gap <= 300):          # sanity: reasonable gap
+                                skipped += 1
+                                continue
+                            surv = float(row.get("survival_time", 0))
+                            if surv > 3600:                     # epoch-scale timestamp bug
+                                skipped += 1
+                                continue
+                            rows.append(row)
+                        except (ValueError, KeyError):
                             skipped += 1
-                            continue
-                        surv = float(row.get("survival_time", 0))
-                        if surv > 3600:                     # epoch-scale timestamp bug
-                            skipped += 1
-                            continue
-                        rows.append(row)
-                    except (ValueError, KeyError):
-                        skipped += 1
-        except Exception:
-            pass
+            except Exception:
+                pass
 
-    if skipped:
+    if skipped and verbose:
         print(f"[HumanTrainer] Skipped {skipped} malformed rows")
     return rows
 
@@ -148,18 +161,18 @@ def train_from_human_logs(
     log_dir: str = LOG_DIR,
     model_path: str = HUMAN_MODEL_PATH,
     verbose: bool = True,
+    controller_filters: tuple = ("adaptive", "maharoga"),
 ) -> Optional[dict]:
     """Load human logs, train a model, save to model_path.
 
-    Returns the saved bundle dict {model, feature_names, trained_at,
-    n_samples} or None if insufficient data.
+    Returns the saved bundle dict or None if insufficient data.
     """
     from sklearn.linear_model import LogisticRegression
     from sklearn.model_selection import GroupShuffleSplit
     from sklearn.metrics import roc_auc_score
     import joblib
 
-    rows = _load_human_rows(log_dir)
+    rows = _load_human_rows(log_dir, controller_filters=controller_filters, verbose=verbose)
     if not rows:
         if verbose:
             print("[HumanTrainer] No human session logs found.")
@@ -236,6 +249,7 @@ def retrain_if_needed(
     log_dir: str = LOG_DIR,
     model_path: str = HUMAN_MODEL_PATH,
     verbose: bool = True,
+    controller_filters: tuple = ("adaptive", "maharoga"),
 ) -> Optional[dict]:
     """Retrain only if the cooldown has elapsed since the last training run.
 
@@ -257,7 +271,12 @@ def retrain_if_needed(
         # Still return existing model if it exists
         return _load_model_bundle(model_path)
 
-    bundle = train_from_human_logs(log_dir=log_dir, model_path=model_path, verbose=verbose)
+    bundle = train_from_human_logs(
+        log_dir=log_dir,
+        model_path=model_path,
+        verbose=verbose,
+        controller_filters=controller_filters,
+    )
 
     # Update timestamp regardless of success so we don't hammer disk on failure
     try:
@@ -285,8 +304,9 @@ def _load_model_bundle(model_path: str = HUMAN_MODEL_PATH) -> Optional[dict]:
         return None
 
 
-def count_human_samples(log_dir: str = LOG_DIR) -> int:
+def count_human_samples(log_dir: str = LOG_DIR,
+                        controller_filters: tuple = ("adaptive", "maharoga")) -> int:
     """Return number of valid human-play rows available for training."""
-    rows = _load_human_rows(log_dir)
+    rows = _load_human_rows(log_dir, controller_filters=controller_filters)
     _, y, _ = _rows_to_X_y(rows)
     return len(y)

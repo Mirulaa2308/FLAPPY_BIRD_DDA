@@ -1,7 +1,7 @@
 """Core game module.
 
 FlappyGame  – headless/agent-compatible game engine (unchanged API surface).
-play_human  – full human-playable loop with Home / Game / GameOver screens.
+play_human  – full human-playable loop with Main Menu → Difficulty → Game → GameOver.
 """
 import os
 import time
@@ -12,6 +12,8 @@ from game.config import (
     FIXED_GAP, FIXED_PIPE_SPEED, FIXED_SPAWN_INTERVAL,
     COLOR_TEXT, COLOR_PIPE,
     BEST_SCORE_FILE,
+    DIFFICULTY_PRESETS,
+    GAP_MIN, GAP_MAX,
 )
 from game.bird import Bird
 from game.pipe import Pipe
@@ -42,6 +44,38 @@ def _save_best(mode_key, score):
             f.write(str(score))
     except Exception:
         pass
+
+
+# ---------------------------------------------------------------------------
+#  Maharoga record  –  best score  +  gap at that pipe pass
+# ---------------------------------------------------------------------------
+_MAHAROGA_RECORD_FILE = "data/maharoga_record.json"
+
+
+def _load_maharoga_record():
+    """Return {best_score, gap_at_best} or defaults."""
+    try:
+        import json
+        with open(_MAHAROGA_RECORD_FILE) as f:
+            rec = json.load(f)
+        return {
+            "best_score":   int(rec.get("best_score", 0)),
+            "gap_at_best":  int(rec.get("gap_at_best", 0)),
+        }
+    except Exception:
+        return {"best_score": 0, "gap_at_best": 0}
+
+
+def _save_maharoga_record(score, gap_at_best):
+    """Persist the Maharoga best score and the gap active at that pipe."""
+    os.makedirs(os.path.dirname(_MAHAROGA_RECORD_FILE), exist_ok=True)
+    try:
+        import json
+        with open(_MAHAROGA_RECORD_FILE, "w") as f:
+            json.dump({"best_score": score, "gap_at_best": gap_at_best}, f)
+    except Exception:
+        pass
+
 
 
 # ---------------------------------------------------------------------------
@@ -375,21 +409,93 @@ class _Button:
 #  Screen: Home / Mode selection
 # ---------------------------------------------------------------------------
 
-def _home_screen(screen, clock, best_fixed, best_adaptive):
-    """Returns 'fixed', 'adaptive', or 'quit'."""
-    bg = BackgroundRenderer()
+# ---------------------------------------------------------------------------
+#  Animated menu background simulation
+#  Runs a decoupled Bird + Pipes simulation ONLY for visual decoration.
+#  Writes NO score, NO training labels, NO log records.
+# ---------------------------------------------------------------------------
 
+class _MenuBgSim:
+    """Minimal headless bird+pipe simulator used only for menu background visuals.
+    No data is collected; this object is completely separate from the game."""
+    SPAWN_INTERVAL = 90
+
+    def __init__(self):
+        self._bird  = Bird()
+        self._pipes = []
+        self._frame = 0
+        self._reset_bird()
+
+    def _reset_bird(self):
+        self._bird.reset()
+        self._bird.velocity = -4.0  # small upward nudge so it doesn't fall immediately
+
+    def update(self):
+        self._frame += 1
+
+        # Flap logic: keep bird in the middle 40 % of the screen vertically
+        if self._bird.y > SCREEN_HEIGHT * 0.65:
+            self._bird.jump()
+        if self._bird.y < SCREEN_HEIGHT * 0.20:
+            pass  # let gravity pull it down
+
+        self._bird.update()
+
+        # Spawn pipes
+        if self._frame % self.SPAWN_INTERVAL == 0:
+            from game.pipe import Pipe as _Pipe
+            self._pipes.append(_Pipe(SCREEN_WIDTH + 40, 180, speed=2.5))
+
+        for p in self._pipes:
+            p.update()
+        self._pipes = [p for p in self._pipes if not p.off_screen()]
+
+        # Reset bird if it escapes vertically (keep the animation going)
+        if self._bird.y < 0 or self._bird.y > SCREEN_HEIGHT:
+            self._reset_bird()
+            self._pipes.clear()
+
+    def draw(self, surface):
+        # Draw pipes with slight transparency to keep them subtle
+        pipe_surf = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        for p in self._pipes:
+            p.draw(pipe_surf)
+        # 50 % alpha overlay
+        pipe_surf.set_alpha(128)
+        surface.blit(pipe_surf, (0, 0))
+
+        # Draw bird
+        self._bird.draw(surface)
+
+
+# ---------------------------------------------------------------------------
+#  Screen: Main Menu  (PLAY / SETTINGS / CREDITS / QUIT)
+# ---------------------------------------------------------------------------
+
+def _main_menu_screen(screen, clock):
+    """Polished main menu.  Returns: 'play', 'settings', 'credits', 'quit'."""
     W, H = SCREEN_WIDTH, SCREEN_HEIGHT
+    bg   = BackgroundRenderer()
+    sim  = _MenuBgSim()
 
-    btn_w, btn_h = 300, 52
-    btn_x = W // 2 - btn_w // 2
+    btn_w, btn_h = 190, 46
+    btn_x = 28              # left-aligned column
 
-    btn_fixed    = _Button((btn_x, 212, btn_w, btn_h),
-                           "Play Fixed Difficulty",
-                           (35, 110, 205), (65, 150, 255))
-    btn_adaptive = _Button((btn_x, 276, btn_w, btn_h),
-                           "Play Adaptive Difficulty",
-                           (35, 155, 80), (60, 200, 110))
+    # Button vertical band starts at 40 % from the top
+    btn_top = int(H * 0.42)
+    GAP = 12
+
+    btn_play     = _Button((btn_x, btn_top,                   btn_w, btn_h), "PLAY",
+                            (40, 180, 70),  (70, 220, 110))
+    btn_settings = _Button((btn_x, btn_top + (btn_h + GAP),   btn_w, btn_h), "SETTINGS",
+                            (45, 110, 200), (75, 150, 240))
+    btn_credits  = _Button((btn_x, btn_top + 2 * (btn_h + GAP), btn_w, btn_h), "CREDITS",
+                            (140, 60, 180), (180, 90, 220))
+    btn_quit     = _Button((btn_x, btn_top + 3 * (btn_h + GAP), btn_w, btn_h), "QUIT",
+                            (180, 45, 45),  (220, 80, 80))
+
+    buttons = [btn_play, btn_settings, btn_credits, btn_quit]
+    bg_frame = 0
 
     while True:
         for event in pygame.event.get():
@@ -397,93 +503,352 @@ def _home_screen(screen, clock, best_fixed, best_adaptive):
                 return "quit"
             if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
                 return "quit"
-            if btn_fixed.is_clicked(event):
-                return "fixed"
-            if btn_adaptive.is_clicked(event):
-                return "adaptive"
+            if btn_play.is_clicked(event):     return "play"
+            if btn_settings.is_clicked(event): return "settings"
+            if btn_credits.is_clicked(event):  return "credits"
+            if btn_quit.is_clicked(event):     return "quit"
 
-        bg.update(pipes_passed=0)
+        # Animate background
+        sim.update()
+        bg.update(pipes_passed=bg_frame // 30)  # slow sky progression on menu
         bg.draw(screen)
+        bg_frame += 1
+
+        # Draw animated bird+pipes behind everything
+        sim.draw(screen)
+
+        # ---- Dark left-side card for readability -------------------------
+        card_w = btn_w + 56
+        card_h = H - 20
+        card_surf = pygame.Surface((card_w, card_h), pygame.SRCALPHA)
+        card_surf.fill((8, 12, 30, 200))
+        screen.blit(card_surf, (0, 10))
+        # Subtle right border on the card
+        pygame.draw.line(screen, (80, 120, 200, 120),
+                         (card_w, 10), (card_w, H - 10), 2)
 
         # ---- Title -------------------------------------------------------
-        _centred_shadow_text(screen, "FLAPPY ADAPT",
-                             _font(48, bold=True), (255, 235, 70), 55, shadow_offset=2)
+        _shadow_text(screen, "FLAPPY",
+                     _font(42, bold=True), (255, 235, 70), (18, 28), shadow_offset=2)
+        _shadow_text(screen, "ADAPT",
+                     _font(42, bold=True), (100, 200, 255), (18, 76), shadow_offset=2)
 
-        # ---- Subtitle in pill --------------------------------------------
-        sub_text = "A Flappy Bird with Smart Difficulty"
-        sub_font = _font(16, bold=True)
-        sub_w, sub_h = sub_font.size(sub_text)
-        _pill(screen, W // 2 - sub_w // 2 - 14, 114, sub_w + 28, sub_h + 8,
-              bg_color=(12, 20, 42, 170), border_color=(90, 140, 230, 140), radius=10)
-        _centred_shadow_text(screen, sub_text, sub_font, (225, 245, 255), 118, shadow_offset=1)
+        # ---- Thin accent rule under title --------------------------------
+        pygame.draw.line(screen, (80, 160, 255), (18, 128), (card_w - 18, 128), 2)
 
-        # ---- Best scores row in pill -------------------------------------
-        best_w = 360
-        best_h = 36
-        best_x = W // 2 - best_w // 2
-        _pill(screen, best_x, 156, best_w, best_h,
-              bg_color=(12, 20, 42, 190), border_color=(80, 130, 215, 150), radius=12)
-
-        bf_str  = f"Best Fixed: {best_fixed}"
-        ba_str  = f"Best Adaptive: {best_adaptive}"
-        sf16    = _font(15, bold=True)
-        bf_w    = sf16.size(bf_str)[0]
-        ba_w    = sf16.size(ba_str)[0]
-        pad     = max(12, (best_w - bf_w - ba_w) // 3)
-        _shadow_text(screen, bf_str,  sf16, (255, 225, 90),  (best_x + pad, 165), shadow_offset=1)
-        _shadow_text(screen, ba_str,  sf16, (100, 255, 175), (best_x + pad * 2 + bf_w, 165), shadow_offset=1)
+        # ---- Tagline -----------------------------------------------------
+        tag_f = _font(12, bold=False)
+        _shadow_text(screen, "Smart Difficulty · Adaptive ML",
+                     tag_f, (180, 215, 255), (18, 136), shadow_offset=1)
 
         # ---- Buttons -----------------------------------------------------
-        btn_fixed.draw(screen)
-        btn_adaptive.draw(screen)
+        for btn in buttons:
+            btn.draw(screen)
 
-        # ---- Mode descriptions in backing card --------------------------
-        card_w = 420
-        card_h = 216
-        card_x = W // 2 - card_w // 2
-        card_y = 348
-        _pill(screen, card_x, card_y, card_w, card_h,
-              bg_color=(14, 22, 45, 220), border_color=(85, 135, 220, 160), radius=14, border_width=2)
-
-        hdr_font  = _font(15, bold=True)
-        body_font = _font(14)
-        line_h    = 21
-
-        fixed_desc = [
-            "Fixed Difficulty:",
-            "  Pipe gap, speed, and spawn rate never change.",
-            "  Same challenge from start to finish.",
-        ]
-        adaptive_desc = [
-            "Adaptive Difficulty:",
-            "  Watches your pass rate over the last 5 pipes.",
-            "  Gets harder when you fly well, easier when you struggle.",
-        ]
-
-        desc_top = card_y + 14
-        for i, line in enumerate(fixed_desc):
-            col = (255, 230, 100) if i == 0 else (225, 240, 255)
-            font_to_use = hdr_font if i == 0 else body_font
-            _shadow_text(screen, line, font_to_use, col,
-                         (card_x + 18, desc_top + i * line_h), shadow_offset=1)
-
-        adaptive_top = desc_top + len(fixed_desc) * line_h + 10
-        for i, line in enumerate(adaptive_desc):
-            col = (110, 255, 175) if i == 0 else (225, 240, 255)
-            font_to_use = hdr_font if i == 0 else body_font
-            _shadow_text(screen, line, font_to_use, col,
-                         (card_x + 18, adaptive_top + i * line_h), shadow_offset=1)
-
-        # ---- Controls hint in pill ---------------------------------------
-        hint_str = "SPACE / Click to jump   \u2022   ESC to quit"
-        hf = _font(14, bold=True)
-        hw, hh = hf.size(hint_str)
-        _pill(screen, W // 2 - hw // 2 - 14, H - 36, hw + 28, hh + 8,
-              bg_color=(10, 18, 32, 200), border_color=(80, 130, 200, 130), radius=10)
-        _centred_shadow_text(screen, hint_str, hf, (235, 245, 255), H - 32, shadow_offset=1)
+        # ---- Controls hint at the bottom of the card --------------------
+        hint_f = _font(11)
+        _shadow_text(screen, "SPACE / Click to flap",
+                     hint_f, (160, 190, 230), (18, H - 40), shadow_offset=1)
+        _shadow_text(screen, "ESC to quit",
+                     hint_f, (160, 190, 230), (18, H - 24), shadow_offset=1)
 
         pygame.display.flip()
         clock.tick(FPS)
+
+
+# ---------------------------------------------------------------------------
+#  Screen: Settings
+# ---------------------------------------------------------------------------
+
+def _settings_screen(screen, clock):
+    """Simple settings stub – returns when the player presses Back."""
+    W, H = SCREEN_WIDTH, SCREEN_HEIGHT
+    btn_back = _Button((W // 2 - 80, H - 90, 160, 46), "BACK",
+                       (70, 100, 180), (100, 140, 220))
+    while True:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                return
+            if event.type == pygame.KEYDOWN and event.key in (pygame.K_ESCAPE, pygame.K_BACKSPACE):
+                return
+            if btn_back.is_clicked(event):
+                return
+
+        screen.fill((10, 14, 32))
+        _centred_shadow_text(screen, "SETTINGS", _font(38, bold=True),
+                             (200, 230, 255), 60, shadow_offset=2)
+        _centred_shadow_text(screen, "(Coming soon)", _font(18),
+                             (160, 180, 210), 130, shadow_offset=1)
+        btn_back.draw(screen)
+        pygame.display.flip()
+        clock.tick(FPS)
+
+
+# ---------------------------------------------------------------------------
+#  Screen: Credits
+# ---------------------------------------------------------------------------
+
+def _credits_screen(screen, clock):
+    """Credits screen – returns when the player presses Back."""
+    W, H = SCREEN_WIDTH, SCREEN_HEIGHT
+    btn_back = _Button((W // 2 - 80, H - 90, 160, 46), "BACK",
+                       (70, 100, 180), (100, 140, 220))
+    lines = [
+        ("FLAPPY ADAPT",   _font(34, bold=True), (255, 235, 70)),
+        ("Version 2.0",     _font(16),            (200, 220, 255)),
+        ("",               None,                  None),
+        ("Design & ML",    _font(16, bold=True),  (160, 200, 255)),
+        ("Dynamic Difficulty Adaptation", _font(14), (200, 220, 255)),
+        ("",               None,                  None),
+        ("MAHAROGA mode inspired by", _font(14),   (180, 140, 230)),
+        ("Jujutsu Kaisen \u2014 Domain Expansion", _font(14), (200, 160, 255)),
+        ("",               None,                  None),
+        ("Built with Python + pygame-ce", _font(13), (160, 185, 215)),
+        ("scikit-learn  ·  numpy  ·  joblib", _font(13), (160, 185, 215)),
+    ]
+    while True:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                return
+            if event.type == pygame.KEYDOWN and event.key in (pygame.K_ESCAPE, pygame.K_BACKSPACE):
+                return
+            if btn_back.is_clicked(event):
+                return
+
+        screen.fill((10, 14, 32))
+        y = 40
+        for text, font, color in lines:
+            if font is None:
+                y += 12
+                continue
+            w = font.size(text)[0]
+            x = W // 2 - w // 2
+            _shadow_text(screen, text, font, color, (x, y), shadow_offset=1)
+            y += font.size(text)[1] + 6
+
+        btn_back.draw(screen)
+        pygame.display.flip()
+        clock.tick(FPS)
+
+
+# ---------------------------------------------------------------------------
+#  Screen: Difficulty Selection
+# ---------------------------------------------------------------------------
+
+# Maharoga particle effect (floating purple/gold sparks behind the card)
+class _MaharogaParticle:
+    def __init__(self, x, y):
+        import random
+        self.x = float(x)
+        self.y = float(y)
+        self.vx = random.uniform(-0.6, 0.6)
+        self.vy = random.uniform(-1.4, -0.4)
+        self.life = random.randint(30, 80)
+        self.max_life = self.life
+        self.size = random.randint(2, 4)
+        c = random.choice([(200, 80, 255), (255, 200, 80), (120, 40, 220)])
+        self.color = c
+
+    def update(self):
+        self.x += self.vx
+        self.y += self.vy
+        self.life -= 1
+
+    def alive(self):
+        return self.life > 0
+
+    def draw(self, surface):
+        alpha = int(255 * (self.life / self.max_life))
+        s = pygame.Surface((self.size * 2, self.size * 2), pygame.SRCALPHA)
+        pygame.draw.circle(s, (*self.color, alpha), (self.size, self.size), self.size)
+        surface.blit(s, (int(self.x - self.size), int(self.y - self.size)))
+
+
+def _difficulty_screen(screen, clock):
+    """Four-card difficulty selection.  Returns the chosen key or 'back'."""
+    import random
+    W, H = SCREEN_WIDTH, SCREEN_HEIGHT
+    bg   = BackgroundRenderer()
+    sim  = _MenuBgSim()
+
+    difficulties = ["easy", "medium", "hard", "maharoga"]
+    selected = "medium"    # default highlight
+
+    # Card layout: 2x2 grid
+    CARD_W, CARD_H = 200, 158
+    H_GAP, V_GAP = 16, 14
+    grid_w = 2 * CARD_W + H_GAP
+    grid_h = 2 * CARD_H + V_GAP
+    grid_x = W // 2 - grid_w // 2
+    grid_y = 110
+
+    card_rects = {}
+    for i, key in enumerate(difficulties):
+        col = i % 2
+        row = i // 2
+        cx = grid_x + col * (CARD_W + H_GAP)
+        cy = grid_y + row * (CARD_H + V_GAP)
+        card_rects[key] = pygame.Rect(cx, cy, CARD_W, CARD_H)
+
+    btn_play = _Button((W // 2 - 100, grid_y + grid_h + 18, 200, 48),
+                       "PLAY!", (60, 200, 90), (90, 240, 130))
+    btn_back = _Button((W // 2 - 100, grid_y + grid_h + 76, 200, 40),
+                       "BACK", (90, 90, 120), (120, 120, 160))
+
+    maharoga_particles = []
+    _mrg_spawn_timer = 0
+    bg_frame = 0
+
+    while True:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                return "quit"
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    return "back"
+                if event.key == pygame.K_RETURN:
+                    return selected
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                pos = event.pos
+                for key, rect in card_rects.items():
+                    if rect.collidepoint(pos):
+                        selected = key
+                        break
+                else:
+                    if btn_play.is_clicked(event):
+                        return selected
+                    if btn_back.is_clicked(event):
+                        return "back"
+
+        # Animate background
+        sim.update()
+        bg.update(pipes_passed=bg_frame // 30)
+        bg.draw(screen)
+        bg_frame += 1
+        sim.draw(screen)
+
+        # Dark overlay to settle the background
+        ov = pygame.Surface((W, H), pygame.SRCALPHA)
+        ov.fill((5, 8, 22, 180))
+        screen.blit(ov, (0, 0))
+
+        # ---- Title -------------------------------------------------------
+        _centred_shadow_text(screen, "SELECT DIFFICULTY",
+                             _font(28, bold=True), (230, 245, 255), 62, shadow_offset=2)
+        _centred_shadow_text(screen, "Choose your challenge",
+                             _font(14), (160, 195, 240), 98, shadow_offset=1)
+
+        # ---- MAHAROGA particles ------------------------------------------
+        _mrg_spawn_timer += 1
+        if selected == "maharoga" and _mrg_spawn_timer % 3 == 0:
+            r = card_rects["maharoga"]
+            maharoga_particles.append(
+                _MaharogaParticle(random.uniform(r.left, r.right),
+                                  random.uniform(r.top, r.bottom))
+            )
+        maharoga_particles = [p for p in maharoga_particles if p.alive()]
+        for p in maharoga_particles:
+            p.update()
+            p.draw(screen)
+
+        # ---- Difficulty cards --------------------------------------------
+        for key in difficulties:
+            preset = DIFFICULTY_PRESETS[key]
+            rect   = card_rects[key]
+            is_sel = (key == selected)
+            is_mrg = (key == "maharoga")
+
+            # Card background
+            card_bg = preset["color"] if is_sel else (22, 28, 52)
+            card_border = preset["hover_color"] if is_sel else (
+                (160, 40, 220) if is_mrg else (50, 65, 110)
+            )
+            border_w = 3 if is_sel else 1
+
+            _pill(screen, rect.x, rect.y, rect.w, rect.h,
+                  bg_color=(*card_bg, 230 if is_sel else 200),
+                  border_color=(*card_border, 255 if is_sel else 150),
+                  radius=14, border_width=border_w)
+
+            # MAHAROGA: extra glowing purple ring when selected
+            if is_mrg and is_sel:
+                glow_surf = pygame.Surface((rect.w + 20, rect.h + 20), pygame.SRCALPHA)
+                pygame.draw.rect(glow_surf, (160, 40, 255, 60),
+                                 (0, 0, rect.w + 20, rect.h + 20), border_radius=18)
+                screen.blit(glow_surf, (rect.x - 10, rect.y - 10))
+
+            # Label
+            lbl_font = _font(17, bold=True)
+            lbl_color = (255, 255, 255) if is_sel else (
+                (210, 140, 255) if is_mrg else (180, 200, 240))
+            _centred_shadow_text_rect(screen, preset["label"], lbl_font,
+                                      lbl_color, rect, y_offset=14)
+
+            # JJK flash for MAHAROGA label
+            if is_mrg and is_sel:
+                import math as _math
+                t_off = _math.sin(time.time() * 4) * 2
+                _centred_shadow_text_rect(screen, "\u5c55開",  # 展開 kanji
+                                          _font(11, bold=True),
+                                          (255, 220, 80), rect, y_offset=2,
+                                          shadow_offset=1)
+
+            # Description
+            desc_font = _font(11)
+            desc_color = (240, 245, 255) if is_sel else (140, 165, 210)
+            _centred_shadow_text_rect(screen, preset["description"],
+                                      desc_font, desc_color, rect, y_offset=44)
+
+            # Stats row
+            stats_str = (f"Gap {preset['gap']}  \u2022  Spd {preset['pipe_speed']:.1f}")
+            sf = _font(11)
+            sc = (230, 255, 220) if is_sel else (120, 150, 200)
+            _centred_shadow_text_rect(screen, stats_str, sf, sc, rect, y_offset=62)
+
+            # MAHAROGA record row (best score + gap)
+            if is_mrg:
+                mrec = _load_maharoga_record()
+                if mrec["best_score"] > 0:
+                    rec_str = f"BEST {mrec['best_score']}  •  GAP {mrec['gap_at_best']} px"
+                else:
+                    rec_str = "No record yet"
+                rc = (255, 220, 80) if is_sel else (160, 130, 200)
+                _centred_shadow_text_rect(screen, rec_str, _font(10, bold=True),
+                                          rc, rect, y_offset=80)
+
+            # Selected checkmark badge
+            if is_sel:
+                badge_txt = "\u2714 SELECTED"
+                bf = _font(10, bold=True)
+                bw, bh = bf.size(badge_txt)
+                bx = rect.centerx - bw // 2 - 8
+                by = rect.bottom - bh - 14
+                _pill(screen, bx, by, bw + 16, bh + 6,
+                      bg_color=(10, 10, 10, 200),
+                      border_color=(255, 255, 255, 160), radius=8)
+                _shadow_text(screen, badge_txt, bf, (200, 255, 200),
+                             (bx + 8, by + 3), shadow_offset=1)
+
+        # ---- Action buttons ---------------------------------------------
+        btn_play.draw(screen)
+        btn_back.draw(screen)
+
+        # ---- Current selection label ------------------------------------
+        sel_str = f"Selected: {DIFFICULTY_PRESETS[selected]['label']}"
+        _centred_shadow_text(screen, sel_str, _font(13, bold=True),
+                             (220, 235, 255), grid_y + grid_h + 8, shadow_offset=1)
+
+        pygame.display.flip()
+        clock.tick(FPS)
+
+
+def _centred_shadow_text_rect(surface, text, font, color, rect,
+                               y_offset=0, shadow_offset=1):
+    """Centre text within a pygame.Rect at rect.top + y_offset."""
+    w = font.size(text)[0]
+    x = rect.centerx - w // 2
+    y = rect.top + y_offset
+    _shadow_text(surface, text, font, color, (x, y), shadow_offset, _SHADOW_DARK)
 
 
 # ---------------------------------------------------------------------------
@@ -561,6 +926,15 @@ def _gameover_screen(screen, clock, score, best_score, mode_name, bg, pipes_pass
                              _font(19, bold=True), best_color,
                              panel_y + 152, shadow_offset=1)
 
+        # Maharoga: show gap at best-scoring run
+        if mode_name == "maharoga":
+            mrec = _load_maharoga_record()
+            if mrec["best_score"] > 0:
+                gap_lbl = f"Gap at best: {mrec['gap_at_best']} px"
+                _centred_shadow_text(screen, gap_lbl,
+                                     _font(13, bold=True), (200, 170, 255),
+                                     panel_y + 178, shadow_offset=1)
+
         # Buttons inside panel
         btn_retry.draw(screen)
         btn_home.draw(screen)
@@ -578,12 +952,17 @@ def _gameover_screen(screen, clock, score, best_score, mode_name, bg, pipes_pass
 #  In-game HUD
 # ---------------------------------------------------------------------------
 
-def _draw_hud(screen, score, current_gap, mode_name, pipe_speed=None):
+def _draw_hud(screen, score, current_gap, mode_name, pipe_speed=None,
+              debug_info: dict = None):
     """Draw score, mode tag, and optional adaptive debug info.
 
     All elements are placed in clean, semi-transparent rounded pill backings
     with subtle borders so they are 100% readable across every sky phase
     and never obscured when pipes scroll through the upper screen.
+
+    debug_info – dict returned by DataDrivenAdaptiveController.debug_info().
+                 When present, renders a compact dev panel in the bottom-right
+                 corner (not visible in fixed mode).
     """
     # Large score in top-centre pill badge
     score_str = str(score)
@@ -613,10 +992,142 @@ def _draw_hud(screen, score, current_gap, mode_name, pipe_speed=None):
               bg_color=(10, 28, 20, 195), border_color=(60, 180, 110, 140), radius=8)
         _shadow_text(screen, dbg_str, df, (130, 255, 190), (dbg_x + 8, 13), shadow_offset=1)
 
+    # ---- Developer debug panel (bottom-right corner, Maharoga only) --------
+    if debug_info:
+        min_g    = debug_info.get("estimated_min_gap", "?")
+        n_samp   = debug_info.get("n_training_samples", 0)
+        trained  = debug_info.get("model_trained", False)
+        prob     = debug_info.get("last_prob")
+        t_at     = debug_info.get("model_trained_at", "never")
+        reason   = debug_info.get("last_reason", "")
+
+        src_lbl  = f"ML({t_at})" if trained else "FALLBACK"
+        prob_lbl = f"  P={prob:.2f}" if prob is not None else ""
+        # Truncate reason to fit comfortably
+        reason_short = reason[:38] + "…" if len(reason) > 38 else reason
+        lines = [
+            f"Gap:{int(current_gap)}  MinGap:{min_g}  {src_lbl}",
+            f"Samples:{n_samp}{prob_lbl}",
+            f"{reason_short}",
+        ]
+        df2 = _font(11, bold=True)
+        line_h = df2.size("A")[1] + 2
+        panel_w = max(df2.size(l)[0] for l in lines) + 20
+        panel_h = len(lines) * line_h + 8
+        panel_x = SCREEN_WIDTH - panel_w - 6
+        panel_y = SCREEN_HEIGHT - panel_h - 6
+        _pill(screen, panel_x, panel_y, panel_w, panel_h,
+              bg_color=(10, 18, 32, 200), border_color=(60, 120, 200, 120), radius=7)
+        for i, line in enumerate(lines):
+            col = (160, 220, 255) if i == 0 else (180, 200, 240)
+            _shadow_text(screen, line, df2, col,
+                         (panel_x + 8, panel_y + 4 + i * line_h), shadow_offset=1)
+
+
+# ---------------------------------------------------------------------------
+#  Maharoga 100-point Domain Expansion event
+# ---------------------------------------------------------------------------
+MAHAROGA_100_ENABLED        = True   # set False to disable the event
+MAHAROGA_100_EXTRA_NARROWING = 10    # extra px subtracted from gap after event
+MAHAROGA_100_CHALLENGE_LABEL = "DOMAIN EXPANSION"  # on-screen announcement
+
+
+def _maharoga_100_event(screen, clock, bg, pipes_passed):
+    """Play a short in-game animation when the player hits 100 pipes in Maharoga.
+
+    Visual sequence (takes ~2.5 s at 60 FPS):
+      Frame 0-30:   Screen flashes purple → fades to dark overlay
+      Frame 30-90:  Expanding purple ring + "DOMAIN EXPANSION" text bounces in
+      Frame 90-150: Subtitle "Mahoraga has adapted…" fades in, ring shrinks
+      Frame 150+:   Returns
+
+    Returns when the animation completes or the player presses SPACE/click to skip.
+    """
+    W, H = SCREEN_WIDTH, SCREEN_HEIGHT
+    PURPLE1 = (130, 20, 190)
+    PURPLE2 = (200, 60, 255)
+    GOLD    = (255, 215, 60)
+
+    total_frames = 180  # 3 s at 60 fps
+    title_font   = _font(38, bold=True)
+    sub_font     = _font(17, bold=True)
+    hint_font    = _font(13, bold=False)
+
+    for frame in range(total_frames):
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                return "quit"
+            if event.type == pygame.KEYDOWN:
+                if event.key in (pygame.K_SPACE, pygame.K_ESCAPE, pygame.K_RETURN):
+                    return "continue"
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                return "continue"
+
+        # --- Draw background (frozen sky) ---
+        bg.update(pipes_passed=pipes_passed)
+        bg.draw(screen)
+
+        # --- Dark vignette overlay (ramps from 0 → 200) ---
+        dark_a = min(200, int(frame * 200 / 60))
+        vignette = pygame.Surface((W, H), pygame.SRCALPHA)
+        vignette.fill((5, 0, 20, dark_a))
+        screen.blit(vignette, (0, 0))
+
+        # --- Expanding ring ---
+        t = frame / total_frames
+        ring_r = int(30 + t * W * 0.8)
+        ring_a = max(0, int(220 * (1 - t * 1.4)))
+        if ring_a > 0:
+            ring_surf = pygame.Surface((ring_r * 2 + 4, ring_r * 2 + 4), pygame.SRCALPHA)
+            pygame.draw.circle(ring_surf, (*PURPLE2, ring_a), (ring_r + 2, ring_r + 2), ring_r, 4)
+            screen.blit(ring_surf, (W // 2 - ring_r - 2, H // 2 - ring_r - 2))
+
+        # --- Inner glow pulse ---
+        glow_r = int(60 + 20 * abs(0.5 - (frame % 60) / 60))
+        glow_s = pygame.Surface((glow_r * 2, glow_r * 2), pygame.SRCALPHA)
+        pygame.draw.circle(glow_s, (*PURPLE1, 80), (glow_r, glow_r), glow_r)
+        screen.blit(glow_s, (W // 2 - glow_r, H // 2 - glow_r))
+
+        # --- DOMAIN EXPANSION title (scales in over frames 20-60) ---
+        if frame >= 20:
+            title_t = min(1.0, (frame - 20) / 40)
+            title_a = int(255 * title_t)
+            title_surf = title_font.render(MAHAROGA_100_CHALLENGE_LABEL, True, GOLD)
+            alpha_surf = pygame.Surface(title_surf.get_size(), pygame.SRCALPHA)
+            alpha_surf.blit(title_surf, (0, 0))
+            alpha_surf.set_alpha(title_a)
+            screen.blit(alpha_surf, (W // 2 - alpha_surf.get_width() // 2, H // 2 - 60))
+
+            # Sub-label
+            if frame >= 80:
+                sub_a = min(255, int(255 * (frame - 80) / 40))
+                sub_surf = sub_font.render("Mahoraga has adapted  •  The trial continues", True, (200, 170, 255))
+                sub_surf.set_alpha(sub_a)
+                screen.blit(sub_surf, (W // 2 - sub_surf.get_width() // 2, H // 2 + 10))
+
+        # --- 100 badge ---
+        if frame >= 30:
+            badge_a = min(255, int(255 * (frame - 30) / 30))
+            badge_font = _font(28, bold=True)
+            badge_surf = badge_font.render("100", True, (255, 100, 60))
+            badge_surf.set_alpha(badge_a)
+            screen.blit(badge_surf, (W // 2 - badge_surf.get_width() // 2, H // 2 - 110))
+
+        # --- Skip hint ---
+        if frame > 60:
+            hint_surf = hint_font.render("Press SPACE to continue", True, (180, 150, 220))
+            hint_surf.set_alpha(min(255, int(255 * (frame - 60) / 30)))
+            screen.blit(hint_surf, (W // 2 - hint_surf.get_width() // 2, H - 44))
+
+        pygame.display.flip()
+        clock.tick(FPS)
+
+    return "continue"
+
 
 # ---------------------------------------------------------------------------
 #  Single play_session  (one run until collision or quit)
-#  Returns (score, action) where action is 'gameover', 'quit'
+#  Returns (score, action, gap_at_last_pipe) where action is 'gameover', 'quit'
 # ---------------------------------------------------------------------------
 
 def _play_session(screen, clock, controller, mode_name, logger, episode, bg):
@@ -630,15 +1141,22 @@ def _play_session(screen, clock, controller, mode_name, logger, episode, bg):
     success_history = []
     attempt_collisions = 0
     collision_handled = False
+    show_debug_hud = False   # toggled with D key during play
 
-    current_gap = controller.current_gap
-    pipe_speed = getattr(controller, "pipe_speed", FIXED_PIPE_SPEED)
+    current_gap    = controller.current_gap
+    pipe_speed     = getattr(controller, "pipe_speed", FIXED_PIPE_SPEED)
     spawn_interval = int(getattr(controller, "spawn_interval", FIXED_SPAWN_INTERVAL))
+    # Read per-preset delta cap from the controller (FixedController stores it;
+    # DataDrivenAdaptiveController falls back to None -> no clamping).
+    max_center_delta = getattr(controller, "max_center_delta", None)
+    prev_pipe_center = None   # updated each time a pipe is spawned
+    gap_at_last_pipe = current_gap   # tracks gap at the most-recently-passed pipe
+    _100_event_fired = False          # Maharoga 100-point event fires at most once
 
     def _sync_controller():
         nonlocal current_gap, pipe_speed, spawn_interval
-        current_gap = controller.current_gap
-        pipe_speed = getattr(controller, "pipe_speed", pipe_speed)
+        current_gap    = controller.current_gap
+        pipe_speed     = getattr(controller, "pipe_speed", pipe_speed)
         spawn_interval = int(getattr(controller, "spawn_interval", spawn_interval))
 
     def _outcome(success, pipe):
@@ -677,12 +1195,14 @@ def _play_session(screen, clock, controller, mode_name, logger, episode, bg):
         # --- Events ---
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                return score, "quit"
+                return score, "quit", gap_at_last_pipe
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
-                    return score, "quit"
+                    return score, "quit", gap_at_last_pipe
                 if event.key == pygame.K_SPACE:
                     bird.jump()
+                if event.key == pygame.K_d:
+                    show_debug_hud = not show_debug_hud  # toggle dev overlay
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 bird.jump()
 
@@ -704,7 +1224,14 @@ def _play_session(screen, clock, controller, mode_name, logger, episode, bg):
 
         # --- Spawn pipes ---
         if frame_count % spawn_interval == 0:
-            pipes.append(Pipe(SCREEN_WIDTH + 40, current_gap, speed=pipe_speed))
+            new_pipe = Pipe(
+                SCREEN_WIDTH + 40, current_gap,
+                speed=pipe_speed,
+                prev_center=prev_pipe_center,
+                max_center_delta=max_center_delta,
+            )
+            prev_pipe_center = new_pipe.gap_center
+            pipes.append(new_pipe)
 
         # --- Move pipes & remove off-screen ---
         for p in pipes:
@@ -737,6 +1264,7 @@ def _play_session(screen, clock, controller, mode_name, logger, episode, bg):
                 p.passed = True
                 score += 1
                 pipe_index += 1
+                gap_at_last_pipe = current_gap   # record gap at this pipe pass
                 rec = _outcome(True, p)
                 success_history.append(1)
                 logger.log(rec)
@@ -744,19 +1272,59 @@ def _play_session(screen, clock, controller, mode_name, logger, episode, bg):
                 _sync_controller()
                 last_pass_time = time.time()
 
+                # Maharoga 100-point Domain Expansion event (fires once per run)
+                if (mode_name == "maharoga" and score == 100
+                        and not _100_event_fired
+                        and MAHAROGA_100_ENABLED):
+                    _100_event_fired = True
+                    ev_result = _maharoga_100_event(screen, clock, bg, score)
+                    if ev_result == "quit":
+                        return score, "quit", gap_at_last_pipe
+                    # Apply challenge-phase narrowing to the ML controller
+                    if hasattr(controller, "current_gap"):
+                        controller.current_gap = max(
+                            getattr(controller, "_estimated_min_gap",
+                                    controller.current_gap),
+                            controller.current_gap - MAHAROGA_100_EXTRA_NARROWING,
+                        )
+                        _sync_controller()
+
         # --- Draw ---
         bg.update(pipes_passed=score)
         bg.draw(screen)
         for p in pipes:
             p.draw(screen)
         bird.draw(screen)
+        _dbg = (getattr(controller, "debug_info", lambda: None)()
+                if mode_name == "maharoga" else None)
         _draw_hud(screen, score, current_gap, mode_name,
-                  pipe_speed if mode_name == "adaptive" else None)
+                  pipe_speed if mode_name in ("maharoga", "adaptive") else None,
+                  debug_info=_dbg)
+
+        # --- Dev diagnostic overlay (toggle with D) ---
+        if show_debug_hud:
+            from game.config import BIRD_RADIUS, GRAVITY, JUMP_VELOCITY
+            diag_lines = [
+                f"Mode: {mode_name.upper()}",
+                f"Gap: {int(current_gap)}  Speed: {pipe_speed:.2f}  Interval: {spawn_interval}",
+                f"Gravity: {GRAVITY}  Jump: {JUMP_VELOCITY}  Hitbox r: {BIRD_RADIUS}",
+                f"Delta cap: {max_center_delta}  ML override: {getattr(controller, 'ml_override', '?')}",
+                f"Bird y: {bird.y:.1f}  vel: {bird.velocity:.2f}",
+            ]
+            df3 = _font(12, bold=True)
+            lh = df3.size("A")[1] + 2
+            pw = max(df3.size(l)[0] for l in diag_lines) + 16
+            ph = len(diag_lines) * lh + 8
+            _pill(screen, 6, SCREEN_HEIGHT - ph - 6, pw, ph,
+                  bg_color=(0, 0, 0, 210), border_color=(255, 200, 0, 180), radius=7)
+            for i, line in enumerate(diag_lines):
+                _shadow_text(screen, line, df3, (255, 240, 120),
+                             (14, SCREEN_HEIGHT - ph + i * lh), shadow_offset=1)
 
         pygame.display.flip()
         clock.tick(FPS)
 
-    return score, "gameover"
+    return score, "gameover", gap_at_last_pipe
 
 
 # ---------------------------------------------------------------------------
@@ -764,63 +1332,106 @@ def _play_session(screen, clock, controller, mode_name, logger, episode, bg):
 # ---------------------------------------------------------------------------
 
 def play_human(controller, session_id=None):
-    """Full human-play loop: Home → Game → GameOver → loop."""
+    """Full human-play loop: Main Menu → Difficulty → Game → GameOver → loop.
+
+    The `controller` argument is kept for CLI compatibility but is ignored when
+    the player chooses a difficulty from the GUI (the GUI creates its own
+    controller per selected difficulty).
+    """
     pygame.init()
     screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
     pygame.display.set_caption("FLAPPY ADAPT")
     clock = pygame.time.Clock()
 
-    mode_name = controller.name     # "fixed" or "adaptive"
+    from controllers.fixed import FixedController
+    from controllers.dda_controller import DataDrivenAdaptiveController
+
     session_id = session_id or str(int(time.time()))
-    logger = GameLogger(session_id, mode_name)
     bg = BackgroundRenderer()
 
-    best = _load_best(mode_name)
-
-    from controllers.fixed import FixedController
-    from controllers.adaptive import AdaptiveController
-
-    state = "home"
+    state = "menu"
     episode = 0
-
-    best_fixed    = _load_best("fixed")
-    best_adaptive = _load_best("adaptive")
+    active_ctrl = None
+    mode_name = "medium"       # tracks selected difficulty key
+    last_score = 0
+    _maharoga_ctrl = None      # reused across sessions to preserve ML learning
 
     while True:
-        if state == "home":
-            choice = _home_screen(screen, clock, best_fixed, best_adaptive)
+        # ------------------------------------------------------------------ #
+        if state == "menu":
+            choice = _main_menu_screen(screen, clock)
             if choice == "quit":
                 break
-            if choice == "fixed":
-                active_ctrl = FixedController(gap=FIXED_GAP)
-                mode_name = "fixed"
-            else:
-                active_ctrl = AdaptiveController()
-                mode_name = "adaptive"
-            active_ctrl.reset()
-            logger = GameLogger(session_id, mode_name)
-            state = "game"
+            elif choice == "play":
+                state = "difficulty"
+            elif choice == "settings":
+                _settings_screen(screen, clock)
+                # returns to menu
+            elif choice == "credits":
+                _credits_screen(screen, clock)
+                # returns to menu
 
+        # ------------------------------------------------------------------ #
+        elif state == "difficulty":
+            chosen = _difficulty_screen(screen, clock)
+            if chosen == "quit":
+                break
+            elif chosen == "back":
+                state = "menu"
+            else:
+                mode_name = chosen
+                preset = DIFFICULTY_PRESETS[mode_name]
+                if mode_name == "maharoga":
+                    # Reuse the ML controller across runs to preserve learned state
+                    # (cross-session evidence and model weights persist).
+                    if _maharoga_ctrl is None:
+                        _maharoga_ctrl = DataDrivenAdaptiveController(
+                            initial_gap=preset["gap"],
+                            preset_pipe_speed=preset["pipe_speed"],
+                            preset_spawn_interval=preset["spawn_interval"],
+                            debug=True,  # enable console DDA diagnostics
+                        )
+                        # Store delta cap so _play_session can read it
+                        _maharoga_ctrl.max_center_delta = preset.get("max_center_delta")
+                    active_ctrl = _maharoga_ctrl
+                else:
+                    active_ctrl = FixedController(
+                        gap=preset["gap"],
+                        ml_override=preset.get("ml_override", False),
+                        max_center_delta=preset.get("max_center_delta", 90),
+                    )
+                    active_ctrl.pipe_speed    = preset["pipe_speed"]
+                    active_ctrl.spawn_interval = preset["spawn_interval"]
+                active_ctrl.reset()
+                logger = GameLogger(session_id, mode_name)
+                state = "game"
+
+        # ------------------------------------------------------------------ #
         elif state == "game":
             episode += 1
-            score, action = _play_session(
+            score, action, gap_at_pipe = _play_session(
                 screen, clock, active_ctrl, mode_name, logger, episode, bg
             )
+
+            # Notify ML controller that the run ended (triggers retraining)
+            if mode_name == "maharoga" and hasattr(active_ctrl, "on_run_end"):
+                active_ctrl.on_run_end(died=(action == "gameover"))
+
             if action == "quit":
                 break
 
+            # Update best score (keyed by difficulty)
             best = _load_best(mode_name)
             if score > best:
-                best = score
-                _save_best(mode_name, best)
-                if mode_name == "fixed":
-                    best_fixed = best
-                else:
-                    best_adaptive = best
+                _save_best(mode_name, score)
+                # For Maharoga, also persist gap at the best-scoring pipe
+                if mode_name == "maharoga":
+                    _save_maharoga_record(score, gap_at_pipe)
 
             state = "gameover"
             last_score = score
 
+        # ------------------------------------------------------------------ #
         elif state == "gameover":
             best = _load_best(mode_name)
             action = _gameover_screen(
@@ -829,13 +1440,10 @@ def play_human(controller, session_id=None):
             if action == "quit":
                 break
             elif action == "retry":
-                if mode_name == "fixed":
-                    active_ctrl = FixedController(gap=FIXED_GAP)
-                else:
-                    active_ctrl = AdaptiveController()
+                # Reset per-run stats but preserve ML learning for MAHAROGA
                 active_ctrl.reset()
                 state = "game"
             elif action == "home":
-                state = "home"
+                state = "menu"
 
     pygame.quit()

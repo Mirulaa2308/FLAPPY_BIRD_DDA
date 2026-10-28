@@ -1,0 +1,7 @@
+session_id,episode,pipe_index,gap_size,gap_center,bird_y_at_pass,bird_vel_at_pass,time_since_last_pass,success,consecutive_successes_before,consecutive_failures_before,success_rate_last3,success_rate_last5,survival_time,total_pipes_passed,controller
+1793023806,1,0,115,438.141996769279,482.4,4.16,2.78,0,0,0,0.0,0.0,2.78,0,maharoga
+1793023806,2,0,115,206.05332298225912,276.16,-5.72,2.729,0,0,0,0.0,0.0,2.729,0,maharoga
+1793023806,3,1,115,325.5129379807694,323.5,2.64,3.078,1,0,0,0.0,0.0,3.078,1,maharoga
+1793023806,3,1,115,228.053308668223,183.78,-6.1,1.16,0,1,0,1.0,1.0,4.24,1,maharoga
+1793023806,4,0,115,175.4998362082171,235.04,-4.58,2.727,0,0,0,0.0,0.0,2.727,0,maharoga
+1793023806,5,0,115,223.35621964682736,177.66,-1.92,2.753,0,0,0,0.0,0.0,2.753,0,maharoga
